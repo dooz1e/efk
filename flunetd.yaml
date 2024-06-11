@@ -1,25 +1,26 @@
----
 apiVersion: v1
 kind: ServiceAccount
 metadata:
+  labels:
+    k8s-app: fluentd
   name: fluentd
-  
+  namespace: efk
 
 ---
-apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
+apiVersion: rbac.authorization.k8s.io/v1
 metadata:
   name: fluentd
 rules:
-- apiGroups:
-  - ""
-  resources:
-  - pods
-  - namespaces
-  verbs:
-  - get
-  - list
-  - watch
+  - apiGroups:
+      - ""
+    resources:
+      - "namespaces"
+      - "pods"
+    verbs:
+      - "list"
+      - "get"
+      - "watch"
 
 ---
 kind: ClusterRoleBinding
@@ -27,64 +28,114 @@ apiVersion: rbac.authorization.k8s.io/v1
 metadata:
   name: fluentd
 roleRef:
+  apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
   name: fluentd
-  apiGroup: rbac.authorization.k8s.io
 subjects:
 - kind: ServiceAccount
   name: fluentd
-  
+  namespace: efk
+
 ---
 apiVersion: apps/v1
 kind: DaemonSet
 metadata:
   name: fluentd
+  namespace: efk
   labels:
     k8s-app: fluentd-logging
     version: v1
+    kubernetes.io/cluster-service: "true"
 spec:
   selector:
     matchLabels:
       k8s-app: fluentd-logging
-      version: v1
   template:
     metadata:
       labels:
         k8s-app: fluentd-logging
         version: v1
+        kubernetes.io/cluster-service: "true"
     spec:
       serviceAccount: fluentd
       serviceAccountName: fluentd
+      securityContext: {}
       tolerations:
-      - key: node-role.kubernetes.io/master
-        effect: NoSchedule
+      - effect: NoSchedule
+        key: node-role.kubernetes.io/master
+      - effect: NoExecute
+        key: node.kubernetes.io/not-ready
+        operator: Exists
+      - effect: NoExecute
+        key: node.kubernetes.io/unreachable
+        operator: Exists
+      - effect: NoSchedule
+        key: node.kubernetes.io/disk-pressure
+        operator: Exists
+      - effect: NoSchedule
+        key: node.kubernetes.io/memory-pressure
+        operator: Exists
+      - effect: NoSchedule
+        key: node.kubernetes.io/pid-pressure
+        operator: Exists
+      - effect: NoSchedule
+        key: node.kubernetes.io/unschedulable
+        operator: Exists
       containers:
       - name: fluentd
-        image: fluent/fluentd-kubernetes-daemonset:v1-debian-elasticsearch
+        image: fluent/fluentd-kubernetes-daemonset:v1.16-debian-elasticsearch7-1
         env:
           - name:  FLUENT_ELASTICSEARCH_HOST
-            value: "elasticsearch-svc"
-          - name:  FLUENT_ELASTICSEARCH_PORT
+            value: "elasticsearch-svc.efk.svc.cluster.local"
+          - name: FLUENT_ELASTICSEARCH_PORT
             value: "9200"
           - name: FLUENT_ELASTICSEARCH_SCHEME
             value: "http"
+          - name: FLUENTD_SYSTEMD_CONF
+            value: "disable"
+          - name: FLUENT_UID
+            value: "0"
+          - name: FLUENT_CONTAINER_TAIL_PARSER_TYPE
+            value: cri
+          - name: FLUENT_CONTAINER_TAIL_PARSER_TIME_FORMAT
+            value: '%Y-%m-%dT%H:%M:%S.%N%:z'
+          - name: FLUENT_CONTAINER_TAIL_PATH
+            value: /var/log/containers/*
+          - name: FLUENT_ELASTICSEARCH_SSL_VERIFY
+            value: "false"
+          - name: FLUENT_ELASTICSEARCH_USER
+            value: elastic
+          - name: FLUENT_ELASTICSEARCH_PASSWORD
+            value: changeme
         resources:
           limits:
+            cpu: 300m
             memory: 500Mi
           requests:
             cpu: 100m
             memory: 200Mi
+        securityContext:
+          privileged: true
+          runAsGroup: 0
+          runAsUser: 0
         volumeMounts:
         - name: varlog
           mountPath: /var/log
-        - name: varlibdockercontainers
-          mountPath: /var/lib/docker/containers
+        - name: containerlogs
+          mountPath: /var/log/containers
           readOnly: true
       terminationGracePeriodSeconds: 30
       volumes:
       - name: varlog
         hostPath:
           path: /var/log
-      - name: varlibdockercontainers
+          type: ""
+      - name: containerlogs
         hostPath:
-          path: /var/lib/docker/containers
+          path: /var/log/containers
+          type: ""
+      - name: config
+        configMap:
+          defaultMode: 420
+          name: fluentd-config
+        
