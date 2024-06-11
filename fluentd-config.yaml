@@ -1,0 +1,14 @@
+kind: ConfigMap
+apiVersion: v1
+metadata:
+  name: fluentd-config
+  namespace: efk
+  labels:
+    addonmanager.kubernetes.io/mode: Reconcile
+data:
+  tail_container_parse.conf: |
+    <parse>
+      @type multiline
+      format_firstline /\d{4}-\d{1,2}-\d{1,2}/
+      format1 /^(?<time>\d{4}-\d{1,2}-\d{1,2} \d{1,2}:\d{1,2}:\d{1,2}.\d{3}) (?<level>[^\s]+) \[(?<thread>.*)\] \[(?<classname>.*)\] (?<message>.*)/
+    </parse>
